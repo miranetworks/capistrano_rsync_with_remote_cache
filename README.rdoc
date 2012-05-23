@@ -22,6 +22,12 @@ This gem is tested on Mac OS X and Linux. Windows is neither tested nor supporte
 
     gem install capistrano_rsync_with_remote_cache
 
+To install the local version
+
+    rake gem
+    gem install pkg/capistrano_rsync_with_remote_cache-xxxxx.gem
+
+
 == Usage
 
 To use this deployment strategy, add this line to your <tt>deploy.rb</tt> file:

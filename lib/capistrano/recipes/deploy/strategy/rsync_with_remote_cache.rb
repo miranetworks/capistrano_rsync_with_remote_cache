@@ -5,8 +5,9 @@ module Capistrano
   module Deploy
     module Strategy
       class RsyncWithRemoteCache < Remote
-        
+
         class InvalidCacheError < Exception; end
+        class ArtifactGenerationError < Exception; end
 
         def self.default_attribute(attribute, default_value)
           define_method(attribute) { configuration[attribute] || default_value }
@@ -18,59 +19,66 @@ module Capistrano
           :mercurial  => "hg showconfig paths.default",
           :bzr        => "bzr info | grep parent | sed \'s/^.*parent branch: //\'"
         }
-        
+
         default_attribute :rsync_options, '-az --delete --exclude=.hg* --exclude=.git* --exclude=.svn*'
         default_attribute :local_cache, '.rsync_cache'
         default_attribute :repository_cache, 'cached-copy'
+        #default_attribute :artifact_command, 'php bin/vendors install'
+        default_attribute :artifact_command, 'ln -s ../vendor . && php bin/vendors install'
 
         def deploy!
           update_local_cache
+          generate_artifacts
           update_remote_cache
           copy_remote_cache
         end
-        
+
         def update_local_cache
           system(command)
           mark_local_cache
         end
-        
+
+        def generate_artifacts
+          system(command_artifacts)
+        end
+
         def update_remote_cache
           finder_options = {:except => { :no_release => true }}
           find_servers(finder_options).each {|s| system(rsync_command_for(s)) or raise "Command failed" }
         end
-        
+
         def copy_remote_cache
           run("rsync -a --delete #{repository_cache_path}/ #{configuration[:release_path]}/")
         end
-        
+
         def rsync_command_for(server)
           "rsync #{rsync_options} --rsh='ssh -p #{ssh_port(server)}#{" -o \"ProxyCommand ssh #{configuration[:gateway]} nc -w300 %h %p\"" if configuration[:gateway]}' #{local_cache_path}/ #{rsync_host(server)}:#{repository_cache_path}/"
         end
-        
+
         def mark_local_cache
           File.open(File.join(local_cache_path, 'REVISION'), 'w') {|f| f << revision }
         end
-        
+
         def ssh_port(server)
           server.port || ssh_options[:port] || 22
         end
-        
+
         def local_cache_path
           File.expand_path(local_cache)
         end
-        
+
         def repository_cache_path
           File.join(shared_path, repository_cache)
         end
-        
+
         def repository_url
           `cd #{local_cache_path} && #{INFO_COMMANDS[configuration[:scm]]}`.strip
         end
-        
+
         def repository_url_changed?
           repository_url != configuration[:repository]
         end
-        
+
         def remove_local_cache
           logger.trace "repository has changed; removing old local cache from #{local_cache_path}"
           FileUtils.rm_rf(local_cache_path)
@@ -79,15 +87,15 @@ module Capistrano
         def remove_cache_if_repository_url_changed
           remove_local_cache if repository_url_changed?
         end
-        
+
         def rsync_host(server)
           configuration[:user] ? "#{configuration[:user]}@#{server.host}" : server.host
         end
-        
+
         def local_cache_exists?
           File.exist?(local_cache_path)
         end
-        
+
         def local_cache_valid?
           local_cache_exists? && File.directory?(local_cache_path)
         end
@@ -114,8 +122,17 @@ module Capistrano
             raise InvalidCacheError, "The local cache exists but is not valid (#{local_cache_path})"
           end
         end
+
+        def command_artifacts
+          if local_cache_valid?
+            "(cd #{local_cache_path} && #{artifact_command})"
+          else
+            raise InvalidCacheError, "The local cache exists but is not valid (#{local_cache_path})"
+          end
+        end
+
       end
-      
+
     end
   end
 end
